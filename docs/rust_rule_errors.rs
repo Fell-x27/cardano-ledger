@@ -464,7 +464,7 @@ pub mod shelley {
     pub enum LedgersPredicateFailure<Era> {
         /// Tag 0 relayed through `ShelleyBbodyPredFailure`
         LedgersFailure(LedgerPredicateFailure<Era>),
-        /// TODO: capture other constructors when serialisation is required.
+        // TODO: capture other constructors when serialisation is required.
     }
 
     // TODO: Mirror the remaining Shelley-era failures (e.g. MIR, TICK) if
