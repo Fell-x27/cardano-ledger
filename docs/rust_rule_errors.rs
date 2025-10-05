@@ -8,7 +8,6 @@
 //! wiring these definitions into real code.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::marker::PhantomData;
 
 // ---------------------------------------------------------------------------
 // Helper stand-ins
@@ -30,7 +29,7 @@ pub struct EpochNo(pub u64); // `epoch_no = uint .size 8`.
 pub struct NetworkId(pub u8); // `network_id = 0 / 1`.
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Addr(pub Vec<u8>); // Reward/payment addresses are CBOR byte strings.
+pub struct Address(pub Vec<u8>); // `address = bytes` with format described in the CDDL.
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RewardAccount(pub Vec<u8>); // `reward_account = bytes`.
@@ -43,6 +42,8 @@ pub struct Hash32(pub [u8; 32]);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ScriptHash(pub Hash28); // `script_hash = hash28`.
+
+pub type PolicyId = ScriptHash; // `policy_id = script_hash`.
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct DataHash(pub Hash32); // Various datum hashes use 32-byte hashes.
@@ -84,40 +85,505 @@ pub struct ValidityInterval {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct PoolCert; // TODO: expand using the certificates CDDL rules.
+pub enum MIRPot {
+    #[default]
+    Reserves,
+    Treasury,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct MIRPot; // TODO
+pub struct UnitInterval {
+    pub numerator: u64,
+    pub denominator: u64,
+}
+
+impl UnitInterval {
+    pub const HALF: UnitInterval = UnitInterval {
+        numerator: 1,
+        denominator: 2,
+    };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct UTxO<Era>(pub PhantomData<Era>); // TODO
+pub struct NonNegativeInterval {
+    pub numerator: u64,
+    pub denominator: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TxOut<Era>(pub PhantomData<Era>); // TODO
+pub struct EpochInterval(pub u32); // `epoch_interval = uint .size 4`.
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TxCert<Era>(pub PhantomData<Era>); // TODO
+pub struct AddrKeyHash(pub Hash28);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Tx<Era>(pub PhantomData<Era>); // TODO
+pub struct KeyHash(pub Hash28);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Value<Era>(pub PhantomData<Era>); // TODO
+pub struct PoolKeyHash(pub Hash28);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct KeyHash<Role>(pub PhantomData<Role>); // TODO
+pub struct VRFKeyHash(pub Hash32);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct VKey<Role>(pub PhantomData<Role>); // TODO
+pub struct VerificationKey(pub [u8; 32]); // `vkey = bytes .size 32`.
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Credential {
+    KeyHash(AddrKeyHash),
+    ScriptHash(ScriptHash),
+}
+
+impl Default for Credential {
+    fn default() -> Self {
+        Credential::KeyHash(AddrKeyHash(Hash28([0; 28])))
+    }
+}
+
+pub type StakeCredential = Credential;
+pub type CommitteeColdCredential = Credential;
+pub type CommitteeHotCredential = Credential;
+pub type DRepCredential = Credential;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DRep {
+    KeyHash(AddrKeyHash),
+    ScriptHash(ScriptHash),
+    Abstain,
+    NoConfidence,
+}
+
+impl Default for DRep {
+    fn default() -> Self {
+        DRep::Abstain
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct VRFVerKeyHash<Role>(pub PhantomData<Role>); // TODO
+pub struct Anchor {
+    pub url: String,
+    pub data_hash: Hash32,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Credential<Role>(pub PhantomData<Role>); // TODO
+pub struct PoolMetadata {
+    pub url: String,
+    pub metadata_hash: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Relay {
+    SingleHostAddr {
+        port: Option<u16>,
+        ipv4: Option<[u8; 4]>,
+        ipv6: Option<[u8; 16]>,
+    },
+    SingleHostName {
+        port: Option<u16>,
+        dns_name: String,
+    },
+    MultiHostName {
+        dns_name: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct PoolParams {
+    pub operator: PoolKeyHash,
+    pub vrf_keyhash: VRFKeyHash,
+    pub pledge: Coin,
+    pub cost: Coin,
+    pub margin: UnitInterval,
+    pub reward_account: RewardAccount,
+    pub owners: BTreeSet<AddrKeyHash>,
+    pub relays: Vec<Relay>,
+    pub metadata: Option<PoolMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PoolCert {
+    StakeRegistration { credential: StakeCredential },
+    StakeDeregistration { credential: StakeCredential },
+    StakeDelegation { credential: StakeCredential, pool: PoolKeyHash },
+    PoolRegistration { params: PoolParams },
+    PoolRetirement { pool: PoolKeyHash, epoch: EpochNo },
+    RegCert { credential: StakeCredential, coin: Coin },
+    UnregCert { credential: StakeCredential, coin: Coin },
+    VoteDelegCert { credential: StakeCredential, drep: DRep },
+    StakeVoteDelegCert { credential: StakeCredential, pool: PoolKeyHash, drep: DRep },
+    StakeRegDelegCert { credential: StakeCredential, pool: PoolKeyHash, deposit: Coin },
+    VoteRegDelegCert { credential: StakeCredential, drep: DRep, deposit: Coin },
+    StakeVoteRegDelegCert {
+        credential: StakeCredential,
+        pool: PoolKeyHash,
+        drep: DRep,
+        deposit: Coin,
+    },
+    AuthCommitteeHotCert {
+        cold: CommitteeColdCredential,
+        hot: CommitteeHotCredential,
+    },
+    ResignCommitteeColdCert {
+        cold: CommitteeColdCredential,
+        anchor: Option<Anchor>,
+    },
+    RegDRepCert {
+        credential: DRepCredential,
+        deposit: Coin,
+        anchor: Option<Anchor>,
+    },
+    UnregDRepCert {
+        credential: DRepCredential,
+        deposit: Coin,
+    },
+    UpdateDRepCert {
+        credential: DRepCredential,
+        anchor: Option<Anchor>,
+    },
+}
+
+impl Default for PoolCert {
+    fn default() -> Self {
+        PoolCert::StakeRegistration {
+            credential: StakeCredential::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Withdrawals(pub BTreeMap<RewardAccount, Coin>); // `withdrawals = {+ reward_account => coin}`.
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct AssetName(pub Vec<u8>); // `asset_name = bytes .size (0 .. 32)`.
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct MultiAsset(pub BTreeMap<PolicyId, BTreeMap<AssetName, u64>>);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ValueStruct {
+    Coin(Coin),
+    MultiAsset { coin: Coin, assets: MultiAsset },
+}
+
+impl Default for ValueStruct {
+    fn default() -> Self {
+        ValueStruct::Coin(Coin(0))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct BoundedBytes(pub Vec<u8>); // `bounded_bytes = bytes .size (0 .. 64)`.
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BigInt {
+    Int(i128),
+    BigUInt(BoundedBytes),
+    BigNInt(BoundedBytes),
+}
+
+impl Default for BigInt {
+    fn default() -> Self {
+        BigInt::Int(0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PlutusData {
+    Constr { tag: u32, fields: Vec<PlutusData> },
+    Map(BTreeMap<PlutusData, PlutusData>),
+    List(Vec<PlutusData>),
+    Integer(BigInt),
+    Bytes(Vec<u8>),
+}
+
+impl Default for PlutusData {
+    fn default() -> Self {
+        PlutusData::Integer(BigInt::default())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DatumOption {
+    Hash(DataHash),
+    Inline(PlutusData),
+}
+
+impl Default for DatumOption {
+    fn default() -> Self {
+        DatumOption::Hash(DataHash(Hash32([0; 32])))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NativeScript {
+    ScriptPubkey(AddrKeyHash),
+    ScriptAll(Vec<NativeScript>),
+    ScriptAny(Vec<NativeScript>),
+    ScriptNOfK { required: i64, scripts: Vec<NativeScript> },
+    InvalidBefore(SlotNo),
+    InvalidHereafter(SlotNo),
+}
+
+impl Default for NativeScript {
+    fn default() -> Self {
+        NativeScript::ScriptPubkey(AddrKeyHash(Hash28([0; 28])))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PlutusScript {
+    V1(Vec<u8>),
+    V2(Vec<u8>),
+    V3(Vec<u8>),
+}
+
+impl Default for PlutusScript {
+    fn default() -> Self {
+        PlutusScript::V1(vec![])
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Script {
+    Native(NativeScript),
+    Plutus(PlutusScript),
+}
+
+impl Default for Script {
+    fn default() -> Self {
+        Script::Native(NativeScript::default())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ScriptRef(pub Script);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TxOutStruct {
+    Shelley {
+        address: Address,
+        amount: ValueStruct,
+        datum_hash: Option<DataHash>,
+    },
+    Babbage {
+        address: Address,
+        amount: ValueStruct,
+        datum_option: Option<DatumOption>,
+        script_ref: Option<ScriptRef>,
+    },
+}
+
+impl Default for TxOutStruct {
+    fn default() -> Self {
+        TxOutStruct::Shelley {
+            address: Address::default(),
+            amount: ValueStruct::default(),
+            datum_hash: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct UTxOStruct(pub BTreeMap<TxIn, TxOutStruct>);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct VotingProcedure {
+    pub vote: u8, // `vote = 0 .. 2`
+    pub anchor: Option<Anchor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum VoterEnum {
+    CommitteeKey(AddrKeyHash),
+    CommitteeScript(ScriptHash),
+    DRepKey(AddrKeyHash),
+    DRepScript(ScriptHash),
+    StakePool(PoolKeyHash),
+}
+
+impl Default for VoterEnum {
+    fn default() -> Self {
+        VoterEnum::DRepKey(AddrKeyHash(Hash28([0; 28])))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct VotingProceduresStruct(
+    pub BTreeMap<VoterEnum, BTreeMap<GovActionId, VotingProcedure>>,
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ProposalProcedureStruct {
+    pub deposit: Coin,
+    pub reward_account: RewardAccount,
+    pub action: GovActionStruct,
+    pub anchor: Anchor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Constitution {
+    pub anchor: Anchor,
+    pub script_hash: Option<ScriptHash>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct CostModels(pub BTreeMap<u8, Vec<i64>>);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ExUnitPrices {
+    pub mem_price: NonNegativeInterval,
+    pub step_price: NonNegativeInterval,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct PoolVotingThresholds {
+    pub motion_no_confidence: UnitInterval,
+    pub committee_normal: UnitInterval,
+    pub committee_no_confidence: UnitInterval,
+    pub hard_fork_initiation: UnitInterval,
+    pub security_parameter: UnitInterval,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct DRepVotingThresholds {
+    pub motion_no_confidence: UnitInterval,
+    pub committee_normal: UnitInterval,
+    pub committee_no_confidence: UnitInterval,
+    pub update_constitution: UnitInterval,
+    pub hard_fork_initiation: UnitInterval,
+    pub pparam_network: UnitInterval,
+    pub pparam_economic: UnitInterval,
+    pub pparam_technical: UnitInterval,
+    pub pparam_governance: UnitInterval,
+    pub treasury_withdrawal: UnitInterval,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ProtocolParamUpdate {
+    pub minfee_a: Option<Coin>,
+    pub minfee_b: Option<Coin>,
+    pub max_block_body_size: Option<u32>,
+    pub max_tx_size: Option<u32>,
+    pub max_block_header_size: Option<u16>,
+    pub key_deposit: Option<Coin>,
+    pub pool_deposit: Option<Coin>,
+    pub max_epoch: Option<EpochInterval>,
+    pub desired_number_of_pools: Option<u16>,
+    pub pool_pledge_influence: Option<NonNegativeInterval>,
+    pub expansion_rate: Option<UnitInterval>,
+    pub treasury_growth_rate: Option<UnitInterval>,
+    pub min_pool_cost: Option<Coin>,
+    pub ada_per_utxo_byte: Option<Coin>,
+    pub cost_models: Option<CostModels>,
+    pub ex_unit_prices: Option<ExUnitPrices>,
+    pub max_tx_ex_units: Option<ExUnits>,
+    pub max_block_ex_units: Option<ExUnits>,
+    pub max_value_size: Option<u32>,
+    pub collateral_percentage: Option<u16>,
+    pub max_collateral_inputs: Option<u16>,
+    pub pool_voting_thresholds: Option<PoolVotingThresholds>,
+    pub drep_voting_thresholds: Option<DRepVotingThresholds>,
+    pub min_committee_size: Option<u16>,
+    pub committee_term_limit: Option<EpochInterval>,
+    pub governance_action_validity_period: Option<EpochInterval>,
+    pub governance_action_deposit: Option<Coin>,
+    pub drep_deposit: Option<Coin>,
+    pub drep_inactivity_period: Option<EpochInterval>,
+    pub ref_script_coins_per_byte: Option<NonNegativeInterval>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct GovActionId {
+    pub tx_id: TxId,
+    pub action_index: GovActionIx,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GovActionStruct {
+    ParameterChange {
+        previous: Option<GovPurposeIdStruct>,
+        update: ProtocolParamUpdate,
+        policy_hash: Option<ScriptHash>,
+    },
+    HardForkInitiation {
+        previous: Option<GovPurposeIdStruct>,
+        protocol_version: ProtVer,
+    },
+    TreasuryWithdrawals {
+        withdrawals: BTreeMap<RewardAccount, Coin>,
+        policy_hash: Option<ScriptHash>,
+    },
+    NoConfidence {
+        previous: Option<GovPurposeIdStruct>,
+    },
+    UpdateCommittee {
+        previous: Option<GovPurposeIdStruct>,
+        removals: BTreeSet<CommitteeColdCredential>,
+        additions: BTreeMap<CommitteeColdCredential, EpochNo>,
+        new_quorum: UnitInterval,
+    },
+    NewConstitution {
+        previous: Option<GovPurposeIdStruct>,
+        constitution: Constitution,
+    },
+    InfoAction,
+}
+
+impl Default for GovActionStruct {
+    fn default() -> Self {
+        GovActionStruct::InfoAction
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum GovActionPurpose {
+    ParameterChange,
+    HardFork,
+    Committee,
+    Constitution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct GovPurposeIdStruct {
+    pub purpose: GovActionPurpose,
+    pub id: GovActionId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum RedeemerTag {
+    Spend,
+    Mint,
+    Cert,
+    Reward,
+    Voting,
+    Proposing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct PlutusPurposeStruct {
+    pub tag: RedeemerTag,
+    pub index: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct GovEnvStruct;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationKind {
+    Eq,
+    Lteq,
+    Gteq,
+    Lt,
+    Gt,
+    Subset,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationMismatch<T> {
+    pub relation: RelationKind,
+    pub supplied: T,
+    pub expected: T,
+}
 
 pub type StrictMaybe<T> = Option<T>;
 pub type Natural = u64;
@@ -129,79 +595,42 @@ pub type Text = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct NonEmpty<T>(pub Vec<T>); // TODO: enforce the invariant.
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct WitnessRole;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct StakingRole;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct StakePoolRole;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct ColdCommitteeRole;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct HotCommitteeRole;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct DRepRole;
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct GovActionIx(pub u16);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct GovActionId {
-    pub tx_id: TxId,
-    pub action_index: GovActionIx,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct GovAction<Era>(pub PhantomData<Era>); // TODO
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct ProposalProcedure<Era>(pub PhantomData<Era>); // TODO
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct VotingProcedures<Era>(pub PhantomData<Era>); // TODO
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Proposals<Era>(pub PhantomData<Era>); // TODO
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct GovEnv<Era>(pub PhantomData<Era>); // TODO
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Voter(pub PhantomData<()>); // TODO
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct GovPurposeId<Purpose>(pub PhantomData<Purpose>); // TODO
+pub type TxOut<Era> = TxOutStruct;
+pub type Value<Era> = ValueStruct;
+pub type UTxO<Era> = UTxOStruct;
+pub type GovAction<Era> = GovActionStruct;
+pub type ProposalProcedure<Era> = ProposalProcedureStruct;
+pub type VotingProcedures<Era> = VotingProceduresStruct;
+pub type GovEnv<Era> = GovEnvStruct;
+pub type Voter = VoterEnum;
+pub type GovPurposeId<Purpose> = GovPurposeIdStruct;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct HardForkPurpose;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlutusPurpose<Tag, Era>(pub PhantomData<(Tag, Era)>); // TODO
+pub type PlutusPurpose<Tag, Era> = PlutusPurposeStruct;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct AsItem;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct AsIx;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Mismatch<Relation, T> {
-    pub supplied: T,
-    pub expected: T,
-    pub _relation: PhantomData<Relation>,
-}
+pub type Mismatch<Relation, T> = RelationMismatch<T>;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RelEQ;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RelLTEQ;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RelGTEQ;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RelLT;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RelGT;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RelSubset;
 
 // ---------------------------------------------------------------------------
@@ -223,7 +652,7 @@ pub mod shelley {
     pub enum PpupPredicateFailure {
         /// Tag: 0
         NonGenesisUpdatePPUP {
-            offending_keys: Mismatch<RelSubset, BTreeSet<KeyHash<'static>>>,
+            offending_keys: Mismatch<RelSubset, BTreeSet<KeyHash>>,
         },
         /// Tag: 1
         PPUpdateWrongEpoch {
@@ -270,7 +699,7 @@ pub mod shelley {
         /// Tag: 8
         WrongNetwork {
             expected: NetworkId,
-            offending: BTreeSet<Addr>,
+            offending: BTreeSet<Address>,
         },
         /// Tag: 9
         WrongNetworkWithdrawal {
@@ -287,11 +716,11 @@ pub mod shelley {
     pub enum UtxowPredicateFailure<Era> {
         /// Tag: 0
         InvalidWitnessesUTXOW {
-            invalid_witnesses: Vec<Credential<'static>>,
+            invalid_witnesses: Vec<Credential>,
         },
         /// Tag: 1
         MissingVKeyWitnessesUTXOW {
-            missing_signers: BTreeSet<KeyHash<'static>>,
+            missing_signers: BTreeSet<KeyHash>,
         },
         /// Tag: 2
         MissingScriptWitnessesUTXOW {
@@ -305,7 +734,7 @@ pub mod shelley {
         UtxoFailure(super::shelley::UtxoPredicateFailure<Era>),
         /// Tag: 5
         MIRInsufficientGenesisSigsUTXOW {
-            missing_signatures: BTreeSet<KeyHash<'static>>,
+            missing_signatures: BTreeSet<KeyHash>,
         },
         /// Tag: 6
         MissingTxBodyMetadataHash {
@@ -331,11 +760,11 @@ pub mod shelley {
     pub enum DelegPredicateFailure {
         /// Tag: 0
         StakeKeyAlreadyRegistered {
-            credential: Credential<'static>,
+            credential: Credential,
         },
         /// Tag: 1
         StakeKeyNotRegistered {
-            credential: Credential<'static>,
+            credential: Credential,
         },
         /// Tag: 2
         StakeKeyNonZeroAccountBalance {
@@ -343,17 +772,17 @@ pub mod shelley {
         },
         /// Tag: 3
         StakeDelegationImpossible {
-            credential: Credential<'static>,
+            credential: Credential,
         },
         /// Tag: 4
         WrongCertificateType,
         /// Tag: 5
         GenesisKeyNotInMapping {
-            genesis_key: KeyHash<'static>,
+            genesis_key: KeyHash,
         },
         /// Tag: 6
         DuplicateGenesisDelegate {
-            delegate: KeyHash<'static>,
+            delegate: KeyHash,
         },
         /// Tag: 7
         InsufficientForInstantaneousRewards {
@@ -366,7 +795,7 @@ pub mod shelley {
         },
         /// Tag: 9
         DuplicateGenesisVRF {
-            vrf: VRFVerKeyHash<'static>,
+            vrf: VRFKeyHash,
         },
         /// Tag: 11
         MIRTransferNotCurrentlyAllowed,
@@ -390,7 +819,7 @@ pub mod shelley {
     pub enum PoolPredicateFailure {
         /// Tag: 0
         StakePoolNotRegisteredOnKey {
-            pool_id: KeyHash<'static>,
+            pool_id: KeyHash,
         },
         /// Tag: 1
         StakePoolRetirementWrongEpoch {
@@ -404,17 +833,17 @@ pub mod shelley {
         /// Tag: 4
         WrongNetwork {
             network_mismatch: Mismatch<RelEQ, NetworkId>,
-            pool_id: KeyHash<'static>,
+            pool_id: KeyHash,
         },
         /// Tag: 5
         PoolMetadataHashTooBig {
-            pool_id: KeyHash<'static>,
+            pool_id: KeyHash,
             hash_size: usize,
         },
         /// Tag: 6
         VRFKeyHashAlreadyRegistered {
-            pool_id: KeyHash<'static>,
-            vrf: VRFVerKeyHash<'static>,
+            pool_id: KeyHash,
+            vrf: VRFKeyHash,
         },
     }
 
@@ -422,7 +851,7 @@ pub mod shelley {
     pub enum DelegsPredicateFailure<Era> {
         /// Tag: 0
         DelegateeNotRegistered {
-            pool_id: KeyHash<'static>,
+            pool_id: KeyHash,
         },
         /// Tag: 1
         WithdrawalsNotInRewards {
@@ -464,7 +893,7 @@ pub mod shelley {
     pub enum LedgersPredicateFailure<Era> {
         /// Tag 0 relayed through `ShelleyBbodyPredFailure`
         LedgersFailure(LedgerPredicateFailure<Era>),
-        // TODO: capture other constructors when serialisation is required.
+        /// TODO: capture other constructors when serialisation is required.
     }
 
     // TODO: Mirror the remaining Shelley-era failures (e.g. MIR, TICK) if
@@ -549,7 +978,7 @@ pub mod alonzo {
         /// Tag: 8
         WrongNetwork {
             expected: NetworkId,
-            offending: BTreeSet<Addr>,
+            offending: BTreeSet<Address>,
         },
         /// Tag: 9
         WrongNetworkWithdrawal {
@@ -624,7 +1053,7 @@ pub mod alonzo {
     pub enum CollectError<Era> {
         // Placeholder; see `collectTwoPhaseScriptInputs` for full shape.
         /// TODO: encode exact variants from `CollectError`.
-        Placeholder(PhantomData<Era>),
+        Placeholder, // TODO: encode exact variants from `CollectError`.
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -767,7 +1196,7 @@ pub mod conway {
         /// Tag: 7
         WrongNetwork {
             expected: NetworkId,
-            offending: BTreeSet<Addr>,
+            offending: BTreeSet<Address>,
         },
         /// Tag: 8
         WrongNetworkWithdrawal {
@@ -839,11 +1268,11 @@ pub mod conway {
         UtxoFailure(UtxoPredicateFailure<Era>),
         /// Tag: 1
         InvalidWitnessesUTXOW {
-            witnesses: Vec<VKey<WitnessRole>>,
+            witnesses: Vec<VerificationKey>,
         },
         /// Tag: 2
         MissingVKeyWitnessesUTXOW {
-            missing: BTreeSet<KeyHash<WitnessRole>>,
+            missing: BTreeSet<KeyHash>,
         },
         /// Tag: 3
         MissingScriptWitnessesUTXOW {
@@ -920,11 +1349,11 @@ pub mod conway {
         },
         /// Tag: 2
         StakeKeyRegisteredDELEG {
-            stake_credential: Credential<StakingRole>,
+            stake_credential: StakeCredential,
         },
         /// Tag: 3
         StakeKeyNotRegisteredDELEG {
-            stake_credential: Credential<StakingRole>,
+            stake_credential: StakeCredential,
         },
         /// Tag: 4
         StakeKeyHasNonZeroRewardAccountBalanceDELEG {
@@ -932,11 +1361,11 @@ pub mod conway {
         },
         /// Tag: 5
         DelegateeDRepNotRegisteredDELEG {
-            delegatee: Credential<DRepRole>,
+            delegatee: DRepCredential,
         },
         /// Tag: 6
         DelegateeStakePoolNotRegisteredDELEG {
-            delegatee: KeyHash<StakePoolRole>,
+            delegatee: PoolKeyHash,
         },
         /// Tag: 7
         DepositIncorrectDELEG {
@@ -952,11 +1381,11 @@ pub mod conway {
     pub enum GovCertPredicateFailure {
         /// Tag: 0
         ConwayDRepAlreadyRegistered {
-            credential: Credential<DRepRole>,
+            credential: DRepCredential,
         },
         /// Tag: 1
         ConwayDRepNotRegistered {
-            credential: Credential<DRepRole>,
+            credential: DRepCredential,
         },
         /// Tag: 2
         ConwayDRepIncorrectDeposit {
@@ -964,7 +1393,7 @@ pub mod conway {
         },
         /// Tag: 3
         ConwayCommitteeHasPreviouslyResigned {
-            cold_credential: Credential<ColdCommitteeRole>,
+            cold_credential: CommitteeColdCredential,
         },
         /// Tag: 4
         ConwayDRepIncorrectRefund {
@@ -972,7 +1401,7 @@ pub mod conway {
         },
         /// Tag: 5
         ConwayCommitteeIsUnknown {
-            cold_credential: Credential<ColdCommitteeRole>,
+            cold_credential: CommitteeColdCredential,
         },
     }
 
@@ -1026,11 +1455,11 @@ pub mod conway {
         },
         /// Tag: 6
         ConflictingCommitteeUpdate {
-            members: BTreeSet<Credential<ColdCommitteeRole>>,
+            members: BTreeSet<CommitteeColdCredential>,
         },
         /// Tag: 7
         ExpirationEpochTooSmall {
-            expired: BTreeMap<Credential<ColdCommitteeRole>, EpochNo>,
+            expired: BTreeMap<CommitteeColdCredential, EpochNo>,
         },
         /// Tag: 8
         InvalidPrevGovActionId {
@@ -1076,7 +1505,7 @@ pub mod conway {
         },
         /// Tag: 18
         UnelectedCommitteeVoters {
-            voters: NonEmpty<Credential<HotCommitteeRole>>,
+            voters: NonEmpty<CommitteeHotCredential>,
         },
     }
 
@@ -1090,7 +1519,7 @@ pub mod conway {
         ConwayGovFailure(GovPredicateFailure<Era>),
         /// Tag: 4
         ConwayWdrlNotDelegatedToDRep {
-            withdrawals: NonEmpty<KeyHash<StakingRole>>,
+            withdrawals: NonEmpty<AddrKeyHash>,
         },
         /// Tag: 5
         ConwayTreasuryValueMismatch {
