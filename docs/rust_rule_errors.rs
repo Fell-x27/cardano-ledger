@@ -4,8 +4,8 @@
 //! NOTE: These definitions focus on the structure and CBOR tags of the
 //! predicate failure enums. Domain-specific payload types are represented by
 //! lightweight stand-ins so the relationships between failures remain clear.
-//! Any field marked with `TODO` should be replaced with the concrete type when
-//! wiring these definitions into real code.
+//! Replace them with the concrete ledger types when wiring these definitions
+//! into production code.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -39,6 +39,9 @@ pub struct Hash28(pub [u8; 28]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Hash32(pub [u8; 32]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct BlockBodyHash(pub Hash32);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ScriptHash(pub Hash28); // `script_hash = hash28`.
@@ -593,8 +596,54 @@ pub type TagMismatchDescription = String;
 pub type IsValid = bool;
 pub type Text = String;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct NonEmpty<T>(pub Vec<T>); // TODO: enforce the invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Language {
+    #[default]
+    PlutusV1,
+    PlutusV2,
+    PlutusV3,
+    PlutusV4,
+}
+
+pub type ContextError<Era> = Text;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonEmpty<T> {
+    pub head: T,
+    pub tail: Vec<T>,
+}
+
+impl<T> NonEmpty<T> {
+    pub fn new(head: T, tail: Vec<T>) -> Self {
+        NonEmpty { head, tail }
+    }
+
+    pub fn from_vec(mut items: Vec<T>) -> Option<Self> {
+        if items.is_empty() {
+            None
+        } else {
+            let head = items.remove(0);
+            Some(NonEmpty { head, tail: items })
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        1 + self.tail.len()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        std::iter::once(&self.head).chain(self.tail.iter())
+    }
+}
+
+impl<T: Default> Default for NonEmpty<T> {
+    fn default() -> Self {
+        NonEmpty {
+            head: T::default(),
+            tail: Vec::new(),
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct GovActionIx(pub u16);
 
@@ -884,7 +933,7 @@ pub mod shelley {
             mismatch: Mismatch<RelEQ, usize>,
         },
         InvalidBodyHashBBODY {
-            mismatch: Mismatch<RelEQ, [u8; 32]>, // TODO: real hash type
+            mismatch: Mismatch<RelEQ, BlockBodyHash>,
         },
         LedgersFailure(LedgersPredicateFailure<Era>),
     }
@@ -893,11 +942,7 @@ pub mod shelley {
     pub enum LedgersPredicateFailure<Era> {
         /// Tag 0 relayed through `ShelleyBbodyPredFailure`
         LedgersFailure(LedgerPredicateFailure<Era>),
-        /// TODO: capture other constructors when serialisation is required.
     }
-
-    // TODO: Mirror the remaining Shelley-era failures (e.g. MIR, TICK) if
-    // serialisation details become relevant.
 }
 
 // ---------------------------------------------------------------------------
@@ -909,13 +954,53 @@ pub mod allegra {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum UtxoPredicateFailure<Era> {
-        /// Tag: 0 (mirrors Shelley via translation layer)
-        AlonzoWrapped(super::alonzo::UtxoPredicateFailure<Era>),
-        /// Tag: 1
-        ValidateOutsideValidityInterval {
-            interval: ValidityInterval,
+        /// Tag: 0
+        BadInputsUTxO {
+            invalid_inputs: BTreeSet<TxIn>,
         },
-        // TODO: complete once allegra-specific constructors are required.
+        /// Tag: 1
+        OutsideValidityIntervalUTxO {
+            validity_interval: ValidityInterval,
+            current_slot: SlotNo,
+        },
+        /// Tag: 2
+        MaxTxSizeUTxO {
+            size_mismatch: Mismatch<RelLTEQ, Word32>,
+        },
+        /// Tag: 3
+        InputSetEmptyUTxO,
+        /// Tag: 4
+        FeeTooSmallUTxO {
+            fee_mismatch: Mismatch<RelGTEQ, Coin>,
+        },
+        /// Tag: 5
+        ValueNotConservedUTxO {
+            balance_mismatch: Mismatch<RelEQ, Value<Era>>,
+        },
+        /// Tag: 6
+        OutputTooSmallUTxO {
+            outputs: Vec<TxOut<Era>>,
+        },
+        /// Tag: 7
+        UpdateFailure(super::shelley::PpupPredicateFailure),
+        /// Tag: 8
+        WrongNetwork {
+            expected: NetworkId,
+            offending: BTreeSet<Address>,
+        },
+        /// Tag: 9
+        WrongNetworkWithdrawal {
+            expected: NetworkId,
+            offending: BTreeSet<RewardAccount>,
+        },
+        /// Tag: 10
+        OutputBootAddrAttrsTooBig {
+            outputs: Vec<TxOut<Era>>,
+        },
+        /// Tag: 12
+        OutputTooBigUTxO {
+            outputs: Vec<TxOut<Era>>,
+        },
     }
 
     // Mary reuses Allegra failures; see the `mary` module for explicit aliases.
@@ -1051,9 +1136,14 @@ pub mod alonzo {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum CollectError<Era> {
-        // Placeholder; see `collectTwoPhaseScriptInputs` for full shape.
-        /// TODO: encode exact variants from `CollectError`.
-        Placeholder, // TODO: encode exact variants from `CollectError`.
+        /// Tag: 0
+        NoRedeemer(PlutusPurpose<AsItem, Era>),
+        /// Tag: 1
+        NoWitness(ScriptHash),
+        /// Tag: 2
+        NoCostModel(Language),
+        /// Tag: 3
+        BadTranslation(ContextError<Era>),
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1142,8 +1232,6 @@ pub mod babbage {
         },
     }
 
-    // TODO: Extend with Babbage-specific ledgers/bbody predicate failures when
-    // serialisation hooks are required.
 }
 
 // ---------------------------------------------------------------------------
