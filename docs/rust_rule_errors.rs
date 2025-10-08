@@ -1,11 +1,12 @@
-//! Rust representations of STS predicate failure types extracted from the
-//! Cardano ledger `Rules` modules across eras.
+//! Rust representations of the transaction-submission STS predicate failures
+//! extracted from the Cardano ledger `Rules` modules across eras.
 //!
 //! NOTE: These definitions focus on the structure and CBOR tags of the
-//! predicate failure enums. Domain-specific payload types are represented by
-//! lightweight stand-ins so the relationships between failures remain clear.
-//! Replace them with the concrete ledger types when wiring these definitions
-//! into production code.
+//! predicate failure enums that can arise when the mempool validates a
+//! transaction. Domain-specific payload types are represented by lightweight
+//! stand-ins so the relationships between failures remain clear. Replace them
+//! with the concrete ledger types when wiring these definitions into
+//! production code.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -926,23 +927,6 @@ pub mod shelley {
         DelegsFailure(DelegsPredicateFailure<Era>),
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BbodyPredicateFailure<Era> {
-        // No explicit CBOR instance in the source; tags unknown.
-        WrongBlockBodySizeBBODY {
-            mismatch: Mismatch<RelEQ, usize>,
-        },
-        InvalidBodyHashBBODY {
-            mismatch: Mismatch<RelEQ, BlockBodyHash>,
-        },
-        LedgersFailure(LedgersPredicateFailure<Era>),
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum LedgersPredicateFailure<Era> {
-        /// Tag 0 relayed through `ShelleyBbodyPredFailure`
-        LedgersFailure(LedgerPredicateFailure<Era>),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,16 +1002,6 @@ pub mod mary {
 
 pub mod alonzo {
     use super::*;
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BbodyPredicateFailure<Era> {
-        /// Tag: 0
-        ShelleyInAlonzo(super::shelley::BbodyPredicateFailure<Era>),
-        /// Tag: 1
-        TooManyExUnits {
-            bound: Mismatch<RelLTEQ, ExUnits>,
-        },
-    }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum UtxoPredicateFailure<Era> {
